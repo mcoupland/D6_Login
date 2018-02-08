@@ -1,0 +1,26 @@
+#ulp-container{
+	height:500px;
+	min-height:500px;
+	width:950px;
+	min-width:950px;
+	background-repeat:no-repeat;
+}
+
+#ulp-form{
+	width:90%;
+}
+
+#ulp-form div{
+	width:50%;
+	border:solid 1px #000;
+	float:left;
+	display:block;
+}
+
+#ulp-login-form{
+
+}
+
+#ulp-join-form{
+
+}

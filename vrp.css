@@ -1,0 +1,161 @@
+/* 
+ * All CSS styles for velvet rope page and user login page
+*/
+
+/* global elements */
+
+.form-wrapper {
+    width: 65%;
+    margin: auto;
+    box-shadow: -3px 3px 5px #222;
+    clear: both;
+}
+
+input#edit-name, input#edit-pass {
+    width: 255px;
+}
+
+div#edit-name-wrapper, div#edit-pass-wrapper {
+    margin-top: 1px;
+}
+
+.ahbutton {
+  background: url("/sites/all/themes/andrew_harper/images/r_l.gif") no-repeat scroll left center, url("/sites/all/themes/andrew_harper/images/r_r.gif") no-repeat scroll right center, url("/sites/all/themes/andrew_harper/images/r_m.gif") repeat-x scroll center center transparent;
+  border: medium none;
+  color: #FFFFFF;
+  font-family: 'BentonSansRE bold',Verdana,Arial,Helvetica,sans-serif;
+  font-size: 12px;
+  margin: 5px 0;
+  padding: 6px 20px;
+  box-shadow: -1px 1px 3px #333333;
+}
+
+.ahbutton:hover {
+    color: #fff;
+}
+
+/* velvet rope styles */
+
+#vrp-container {
+    height: 500px;
+    min-height: 500px;
+    width: 940px;
+    min-width: 940px;
+    background-repeat: no-repeat;
+    padding-top: 160px;
+}
+
+#vrp-header {
+    height: auto;
+    background: #555;
+    opacity: 0.9;
+    color: #fff;
+    font-size: 12px;
+    font-family: "BentonSansRE Bold Italic";
+    font-style: italic;
+    font-weight: bold;
+    -moz-border-radius-topleft: 4px;
+    -moz-border-radius-topright: 4px;
+    -webkit-border-top-right-radius: 4px;
+    -webkit-border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border-top-left-radius: 4px;
+    padding: 10px 16px;
+}
+
+#vrp-form {
+    background: #f0f0f0;
+    opacity: 0.9;
+    padding: 14px;
+}
+
+#vrp-form-login {
+    border-right: 1px dotted #333333;
+    float: left;
+    width: 280px
+}
+
+input#vrp-form-login-button {
+    float: right;
+    margin-right: 20px;
+}
+
+#vrp-form-login-title, #vrp-form-join-header {
+  font-family: "WhitmanDisplay Regular";
+  font-style: normal;
+  font-weight: normal;
+  font-size: 21px;
+}
+
+#vrp-form-join {
+    float: right;
+    width: 290px;
+}
+
+#vrp-form-hideaway-button {
+    width: 230px;
+}
+
+/* user login styles */
+
+#ulp-container {
+    height: 500px;
+    min-height: 500px;
+    width: 940px;
+    min-width: 940px;
+    background-repeat: no-repeat;
+    padding-top: 160px;
+}
+
+#ulp-header {
+    height: auto;
+    background: #555;
+    opacity: 0.9;
+    color: #fff;
+    font-size: 12px;
+    font-family: "BentonSansRE Bold Italic";
+    font-style: italic;
+    font-weight: bold;
+    -moz-border-radius-topleft: 4px;
+    -moz-border-radius-topright: 4px;
+    -webkit-border-radius-topleft: 4px;
+    -webkit-border-radius-topleft: 4px;
+    padding: 10px 16px;
+}
+
+#ulp-form {
+    background: #f0f0f0;
+    opacity: 0.9;
+    padding: 14px;
+}
+
+#ulp-form-login {
+    border-right: 1px dotted #333333;
+    float: left;
+    width: 280px
+}
+
+input#ulp-form-login-button {
+    float: right;
+    margin-right: 20px;
+}
+
+#ulp-form-login-title, #ulp-form-join-header {
+  font-family: "WhitmanDisplay Regular";
+  font-style: normal;
+  font-weight: normal;
+  font-size: 21px;
+}
+
+#ulp-form-join {
+    float: right;
+    width: 290px;
+}
+
+#vrp-form-hideaway-button {
+    width: 230px;
+}
+
+label#vrp-form-join-sub-header p {
+    line-height: 21px;
+}

@@ -1,0 +1,493 @@
+<?php 
+// ================
+// locals contains static variables that are set on a per instance basis
+// for example Setting::$admin_password is the admin password and can be
+// set differently for each instance.
+// ================
+include_once './locals.php';
+
+/**
+ * implement hook_menu for "login" and "velvet-rope"
+ * NOTE: template.php will redirect "user" to login if user is not logged in
+ */
+function andrewharper_login_menu(){
+	return array( 
+		'login' => array(
+			'title' => '',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('_andrewharper_login_ulp_loginform'),
+			'access callback' => TRUE,
+			'type' => MENU_CALLBACK,
+		),
+		'velvet-rope' => array(
+			'title' => '',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('_andrewharper_login_vrp_loginform'),
+			'access callback' => TRUE,
+			'type' => MENU_CALLBACK,
+		),
+	);
+}
+
+//================================================================================================================================
+//					BEGIN LOGIN CODE
+//================================================================================================================================
+/**
+ * implement hook_user
+ */
+function andrewharper_login_user($op, &$edit, &$user, $category = null){
+    switch($op){
+        case 'login':
+            break;
+        case 'view':
+            $user->content['field_account_type'] = array(
+                    '#type'=> 'user_profile_item',
+                    '#title'=> 'Account Type',
+                    '#value'=> $user->profile_account_type
+                );
+            break;
+    }
+}
+
+/**
+ * implement hook_form_alter
+ */
+function andrewharper_login_form_alter (&$form, $form_state, $form_id) {
+     if ($form_id == 'user-login-form' || $form_id == 'user_login_block' || $form_id == 'user-login') {
+        if (isset($form_state['post']['name'])) {
+             $form['#validate'] = array('andrewharper_login_main');
+        }
+     }
+}
+
+/**
+ * primary function that calls all the steps in logging in, etc.
+ */
+function andrewharper_login_main ($form, $form_state) {
+	andrewharper_watchdog_debug('login', 'andrewharper_login_process_login');
+	
+	$ct_username = ''; //clear text username
+	$ct_password = ''; //clear text password
+	$enc_username = '';	//encrypted username
+	$enc_password = '';	//encrypted password
+	$svc_response;
+	$rolename = '';
+	
+	if(!_andrewharper_login_get_credentials($form_state, $ct_username, $ct_password)){
+		watchdog("login", "Unable to get credentials from form_state", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', 'Username and password are required fields.');   
+		return FALSE;
+	}
+	
+	if(_andrewharper_login_admin_bypass($ct_username, $ct_password)){
+		watchdog("login", "login bypass for admin user", NULL, WATCHDOG_DEBUG);
+		return TRUE;
+	}	
+	
+	if(!_andrewharper_login_encrypt_credentials($ct_username, $ct_password, $enc_username, $enc_password)){
+		watchdog("login", "Unable to encrypt username or password", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', 'Unable to encrypt username or password.');   
+		return FALSE;
+	}	
+	
+	if(!_andrewharper_login_call_loginservice($enc_username, $enc_password, $svc_response)){
+		watchdog("login", "Error calling login service", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', 'Unable to call login service.');   
+		return FALSE;	
+	}
+	
+	if(!_andrewharper_login_process_serviceresponse($svc_response, $isauthenticated, $errormessage)){
+		watchdog("login", "Error processing service response", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', 'Unable to process login service response.');   
+		return FALSE;		
+	}
+	
+	if(!$isauthenticated){
+		watchdog("login", "Login failed", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Login failed: $errormessage.");  
+		return FALSE;
+	}
+	
+	if(!_andrewharper_login_get_rolename($svc_response, $rolename)){
+		watchdog("login", "Error getting role name from service response", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Unable to determine membership type.");   
+		return FALSE;
+	}
+		
+	if(!_andrewharper_login_getorcreate_useraccount($ct_username, $account)){
+		watchdog("login", "Error getting or creating user account", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Unable to get user account.");  
+		return FALSE;
+	}
+	
+	if(!_andrewharper_login_add_userrole($account, $rolename)){
+		watchdog("login", "Error adding user role", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Unable to add membership type to user.");  
+		return FALSE;
+	}
+	
+	if(!_andrewharper_login_update_userprofiledata($account, $svc_response)){
+		watchdog("login", "Error updating user profile data", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Unable to update member profile data.");  
+		return FALSE;	
+	}
+	
+	if(!_andrewharper_login_logintodrupal($account)){
+		watchdog("login", "Error logging user into drupal", NULL, WATCHDOG_DEBUG);
+		form_set_error('name', "Unable to login.");  
+		return FALSE;		
+	}
+	
+	return TRUE;
+}
+
+/**
+ * get the username and password from the form
+ */
+function _andrewharper_login_get_credentials($form_state, &$ct_username, &$ct_password){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_get_credentials');
+	$ct_username = $form_state['values']['name'];
+	$ct_password = trim($form_state['values']['pass']);
+	if($ct_username && $ct_password){
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * check for and process admin login
+ */
+function _andrewharper_login_admin_bypass($ct_username, $ct_password){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_admin_bypass');
+	if($ct_username == 'admin' && $ct_password == Setting::$admin_password){
+		user_external_login_register('admin', 'andrewharper_login');
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * encrypt username and password
+ */
+function _andrewharper_login_encrypt_credentials($ct_username, $ct_password, &$enc_username, &$enc_password){	
+	andrewharper_watchdog_debug('login', '_andrewharper_login_encrypt_credentials');
+	$enc_username = ah_secure_encrypt($ct_username);	
+	$enc_password = ah_secure_encrypt($ct_password);	
+	if($enc_username && $enc_password){
+		return TRUE;
+	}
+	return false;
+}
+
+/**
+ * send encrypted username and password
+ * to login service for authentication
+ */
+function _andrewharper_login_call_loginservice($enc_username, $enc_password, &$svc_response){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_call_loginservice');
+	$cust_svc = Setting::$harperservice_customerservice.'?wsdl';	
+	$client = new SoapClient($cust_svc,array('trace' => 1, 'exceptions' => 0));
+	$svc_response = $client->Login(
+								array(
+									'enc_username' => $enc_username, 
+									'enc_password' => $enc_password,
+									'log_attempt' => true,
+									'sync_data' => false
+								)
+							);	
+	if($svc_response){
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * determine if authentication succeeded and get any errors reported by the login service 
+ */ 
+function _andrewharper_login_process_serviceresponse($svc_response, &$isauthenticated, &$errormessage){	
+	andrewharper_watchdog_debug('login', '_andrewharper_login_process_serviceresponse');
+	
+	if($svc_response->LoginResult->ResponseCode === false){
+		return FALSE;
+	}
+
+	$isauthenticated = FALSE;
+	switch($svc_response->LoginResult->ResponseCode){
+		case 0:
+			$isauthenticated = TRUE;
+			break;
+		case 101:
+			$errormessage = 'Incorrect password';
+			break;
+		case 102:
+			$errormessage = 'No such user name';
+			break;
+		case 103:
+			$errormessage = 'Subscription expired';
+			break;
+		case 104:
+			$errormessage = 'Cannot find any subscriptions';
+			break;
+		case 105:
+			$errormessage = 'Duplicate user name';
+			break;
+		//case 106:
+		//	$errormessage = 'Cannot decrypt stored password';
+		//	break;
+		//case 107:
+		//	$errormessage = 'Cannot decrypt input';
+		//	break;
+		//case 107:
+		//	$errormessage = 'Duplicate email address';
+		//	break;
+		default:
+			$errormessage = 'Unknown error';
+			break;
+	}
+	
+	return TRUE;
+}
+
+/** 
+ * get role name from service login response
+ */
+function _andrewharper_login_get_rolename($svc_response, &$rolename){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_get_rolename');
+	$rolename = $svc_response->LoginResult->NetMembership->Name;
+	if(!$rolename){
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/**
+ * get or create users account
+ */
+function _andrewharper_login_getorcreate_useraccount($ct_username, &$account){	
+	andrewharper_watchdog_debug('login', '_andrewharper_login_getorcreate_useraccount');
+	$account = user_load(array('name' => $ct_username));
+	if (!isset($account->uid)) {
+		$userinfo = array(
+			'name' => $ct_username, 
+			'init' => $ct_username, 
+			'status' => 1, 
+			'access' => time(),
+			);
+		$account = user_save('', $userinfo);
+		if(!$account){
+			return FALSE;
+		}
+	}
+	return TRUE;
+} 
+ 
+/**
+ * add role to user if needed
+ */
+function _andrewharper_login_add_userrole(&$account, $rolename){	
+	andrewharper_watchdog_debug('login', '_andrewharper_login_add_userrole');
+	$role = db_fetch_object(db_query("select rid, name from {role} where name = '%s'", $rolename));	
+	if(!$role->name || !$role->rid){
+		return FALSE;
+	}
+	
+	$roles = $account->roles;
+		$roles[10] = 'Premier';
+		$account = user_save($account, array(
+			'roles' => $roles,
+			));	
+			
+	if(!in_array($role->name, $account->roles)){
+		$roles = $account->roles;
+		$roles[$role->rid] = $role->name;
+		$account = user_save($account, array(
+			'roles' => $roles,
+			));	
+	}
+	return TRUE;
+}
+
+/**
+ * update profile data
+ */ 
+function _andrewharper_login_update_userprofiledata(&$account, $svc_response){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_update_userprofiledata');			
+	$edit = $account->member_data;
+	$edit->CusId = $svc_response->LoginResult->Customer->cusID;
+	$edit->CusCustNum = $svc_response->LoginResult->Customer->cusCustNum;
+	$edit->MemberId = $svc_response->LoginResult->Customer->SfgId;
+	$edit->UserName = $svc_response->LoginResult->Customer->cusUserName;
+	$edit->ScreenName = $svc_response->LoginResult->Customer->cusDisplayName;
+	$edit->Email = $svc_response->LoginResult->Customer->cusEmail;
+	$edit->Salutation = $svc_response->LoginResult->Customer->cusPrefix;
+	$edit->FirstName = $svc_response->LoginResult->Customer->cusFirstName;
+	$edit->LastName = $svc_response->LoginResult->Customer->cusLastName;
+	$edit->Suffix = $svc_response->LoginResult->Customer->cusSuffix;
+	$edit->ProfessionalTitle = $svc_response->LoginResult->Customer->cusTitle;
+	$edit->Address->BusinessName = $svc_response->LoginResult->Customer->cusCompany;
+	$edit->Address->Address1 = $svc_response->LoginResult->Address->addAddress1;
+	$edit->Address->Address2 = $svc_response->LoginResult->Address->addAddress2;
+	$edit->Address->Address3 = $svc_response->LoginResult->Address->addAddress3;
+	$edit->Address->City = $svc_response->LoginResult->Address->addCity;
+	$edit->Address->State = $svc_response->LoginResult->Address->addRegion;
+	$edit->Address->Country = $svc_response->LoginResult->Address->addCountry;
+	$edit->Address->PostalCode = $svc_response->LoginResult->Address->addPostalCode;
+	$edit->Address->Phone = $svc_response->LoginResult->Customer->cusPhone1;	
+	
+	$edit->subscription = new stdClass();
+	$edit->subscription->name = $svc_response->LoginResult->NetMembership->Name;
+	$edit->subscription->mtycode = $svc_response->LoginResult->NetMembership->mtyCode;
+	$edit->subscription->publicationcode = $svc_response->LoginResult->NetMembership->PublicationCode;
+	$edit->subscription->drupalroleid = $re->rid;
+	$edit->subscription->expiredate = $svc_response->LoginResult->NetMembership->nmbDateEnd;
+	$edit->subscription->renewalkeycode = $svc_response->LoginResult->NetMembership->nmbRenewalCode;
+	$edit->subscription->screenname = $svc_response->LoginResult->Customer->cusDisplayName;
+	$edit->subscription->cusid = $svc_response->LoginResult->Customer->cusID;
+
+	$account = user_save($account, array(
+		'mail' => $response->LoginResult->Customer->cusEmail,
+		'member_data' => $edit,
+		));
+	if(!$account){
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/**
+ * function to remove old member data that isn't being used anymore then add the new member data
+ * this needs to be tested thoroughly, then run for all accounts, then deleted and never used again!
+ */
+function _andrewharper_login_clean_memberdata(&$account, $svc_response){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_clean_memberdata');
+	$account = user_save($account, array(
+		'member_data' => null,
+		'subscription_data' => null,//no longer needed
+		'current_subscriptions' => null,//no longer needed
+		));	
+	_andrewharper_login_update_userprofiledata(&$account, $svc_response);
+}
+
+/**
+ * does the final login to drupal
+ */
+function _andrewharper_login_logintodrupal($account){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_logintodrupal');
+	$account = user_save($account, array(
+		'login' => time(),
+		'access' => time(),
+		));	
+	if(!$account){
+		return FALSE;
+	}
+	global $user;
+	$user = $account;
+	return TRUE;
+}
+
+//================================================================================================================================
+//					BEGIN LOGIN CODE
+//================================================================================================================================
+ 
+ 
+ 
+ 
+ 
+//================================================================================================================================
+//					BEGIN VRP/ULP CODE
+//================================================================================================================================
+ 
+//create form elements
+function _andrewharper_login_vrp_loginform(&$form){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_vrp_loginform');
+	return array(
+		'name' => array(
+			'#type' => 'textfield',
+		),
+		'pass' => array(
+			'#type' => 'password',
+		),
+		'#theme' => 'vrptheme_loginform',
+	);
+}
+
+//create form elements
+function _andrewharper_login_ulp_loginform(&$form){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_ulp_loginform');
+	return array(
+		'name' => array(
+			'#type' => 'textfield',
+		),
+		'pass' => array(
+			'#type' => 'password',
+		),
+		'#theme' => 'ulptheme_loginform',
+	);
+}
+
+//specify template to use for the form (based on theme name)
+function andrewharper_login_theme(&$existing, $type, $theme, $path) {
+	andrewharper_watchdog_debug('login', 'andrewharper_login_theme');
+	return array(
+		'vrptheme_loginform' => array(
+			'template' => 'vrploginform',
+			'arguments' => array('form' => NULL),
+		),
+		'ulptheme_loginform' => array(
+			'template' => 'ulploginform',
+			'arguments' => array('form' => NULL),
+		),
+	);
+}
+
+function andrewharper_login_preprocess_vrptheme_loginform( &$vars ) {  
+	andrewharper_watchdog_debug('login', 'andrewharper_login_preprocess_vrptheme_loginform');
+	_andrewharper_login_preprocess_custom($vars, 'vrp');
+}
+
+function andrewharper_login_preprocess_ulptheme_loginform( &$vars ) {  
+	andrewharper_watchdog_debug('login', 'andrewharper_login_preprocess_ulptheme_loginform');
+	_andrewharper_login_preprocess_custom($vars, 'ulp');
+}
+
+function _andrewharper_login_preprocess_custom(&$vars, $type){
+	andrewharper_watchdog_debug('login', '_andrewharper_login_preprocess_custom');
+    drupal_add_css(drupal_get_path('module', 'andrewharper_login') .'/vrp.css');
+	
+	foreach( $vars['form'] as $k => $v ) {    
+		if( preg_match( '/^[a-z]/', $k ) ) {      
+			$vars[$k] = $vars['form'][$k];      
+			unset( $vars['form'][$k] );    
+		}  
+	}	
+	if($vars['form']['#post']){
+		$form_state = array('values' => $vars['form']['#post']);
+		if(andrewharper_login_main($form, $form_state)){
+			drupal_goto($base_url);
+		}
+	}	
+	if($type == 'vrp'){
+		$vrpnid = db_fetch_object(db_query("select nid from {node} where type = 'velvet_rope_page' and status = '1' order by created desc limit 1"));
+		$pagenode = node_load($vrpnid->nid, NULL, FALSE);
+		$vars['pagenode'] = $pagenode;
+		$rand = rand(0, sizeof($pagenode->field_vrp_background_image)-1);
+		$vars['filepath'] = $pagenode->field_vrp_background_image[$rand]['filepath'];
+	}
+	else{
+		$ulpnid = db_fetch_object(db_query("select nid from {node} where type = 'user_login_page' and status = '1' order by created desc limit 1"));
+		$pagenode = node_load($ulpnid->nid, NULL, FALSE);
+		$vars['pagenode'] = $pagenode;
+		$rand = rand(0, sizeof($pagenode->field_ulp_background_image)-1);
+		$vars['filepath'] = $pagenode->field_ulp_background_image[$rand]['filepath'];
+
+	}
+}
+
+
+//================================================================================================================================
+//					BEGIN VRP/ULP CODE
+//================================================================================================================================
+
+
+ 
+ ?>

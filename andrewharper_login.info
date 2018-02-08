@@ -1,0 +1,13 @@
+; $Id: andrewharper_login.info,v 1.2 2008/03/31 06:50:42 quicksketch Exp $
+name = andrewharper_login
+description = Defines simple andrewharper field types.
+package = Andrew Harper
+core = 6.x
+dependencies[] = ah_secure
+
+; Information added by drupal.org packaging script on 2010-06-14
+version = "6.x-2.9"
+core = "6.x"
+project = "andrewharper_login"
+datestamp = "1276539609"
+
